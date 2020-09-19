@@ -1,0 +1,192 @@
+---
+title: "Data624 HW1"
+author: "Wei Zhou"
+date: "9/19/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### 2.10 Exercise
+```{r}
+library(tidyr)
+library(knitr)
+library(utils)
+library(ggplot2)
+library(readxl)
+library(forecast)
+library(fpp2)
+```
+
+### 2.1 Use the help function to explore what the series gold, woolyrnq and gas represent.
+
+a. Use autoplot() to plot each of these in separate plots.
+
+```{r}
+autoplot(gold) +
+  ggtitle("Daily morning gold prices") +
+  xlab("1 January 1985 to 31 March 1989") +
+  ylab("US Dollars")
+
+autoplot(woolyrnq) +
+  ggtitle("Quarterly production of woollen yarn in Australia") +
+  xlab("Mar 1965 to Sep 1994") +
+  ylab("Tonnes")
+
+autoplot(gas) +
+  ggtitle("Australian monthly gas production") +
+  xlab("1956 to 1995") +
+  ylab("production")
+
+```
+
+b. What is the frequency of each series? Hint: apply the frequency() function.
+
+```{r}
+frequency(gold)
+frequency(gas)
+frequency(woolyrnq)
+
+```
+
+c. Use which.max() to spot the outlier in the gold series. Which observation was it?
+
+```{r}
+
+which.max(gold)
+which.max(gas)
+which.max(woolyrnq)
+```
+
+### 2.2 Download the file tute1.csv from the book website, open it in Excel (or some other spreadsheet application), and review its contents. You should find four columns of information. Columns B through D each contain a quarterly series, labelled Sales, AdBudget and GDP. Sales contains the quarterly sales for a small company over the period 1981-2005. AdBudget is the advertising budget and GDP is the gross domestic product. All series have been adjusted for inflation.
+
+```{r}
+file1 = "https://raw.githubusercontent.com/vsinha-cuny/data624/master/hw1/tute1.csv"
+tute1 = read.csv(file = file1, header = T)
+
+mytimeseries <- ts(tute1[,-1], start=1981, frequency=4)
+autoplot(mytimeseries, facets=TRUE)
+```
+```{r}
+autoplot(mytimeseries, facets=FALSE)
+
+```
+### 2.3 Download some monthly Australian retail data from the book website. These represent retail sales in various categories for different Australian states, and are stored in a MS-Excel file. Can you spot any seasonality, cyclicity and trend? What do you learn about the series?
+
+```{r}
+library(openxlsx)
+file2 = "https://raw.githubusercontent.com/vsinha-cuny/data624/master/hw1/retail.xlsx"
+retaildata <- read.xlsx(file2, sheet=1, startRow=2)
+myts <- ts(retaildata[,"A3349873A"], frequency=12, start=c(1982,4))
+autoplot(myts) +
+    ggtitle("Australian retail data")
+```
+Seasonality: There is a large jump in sales starting in October and lasting till end of December.
+
+```{r}
+ggseasonplot(myts)
+
+```
+```{r}
+ggsubseriesplot(myts)
+```
+
+The subseries plot shows the mean values of the time series. In this case we see that the values are in an upward trend from October to December.
+
+```{r}
+gglagplot(myts, lags=12)
+
+```
+
+From the lagplot we see that there is a strong correlation for all lag values. It is strongest for lag=12.
+
+```{r}
+ggAcf(myts)
+
+
+```
+The ACF plot shows strong autocorrelation. The seasonality is reflected in the strongest ACF being observed at lag=12.
+
+### 2.6 Use the following graphics functions: autoplot(), ggseasonplot(), ggsubseriesplot(), gglagplot(), ggAcf() and explore features from the following time series: hsales, usdeaths, bricksq, sunspotarea, gasoline.
+
+```{r}
+autoplot(hsales) +
+    ggtitle("Monthly sales of new one-family houses sold in the USA since 1973")
+```
+
+```{r}
+ggseasonplot(hsales)
+
+```
+```{r}
+ggsubseriesplot(hsales)
+
+```
+```{r}
+gglagplot(hsales, lags=12)
+
+```
+
+```{r}
+ggAcf(hsales)
+
+```
+```{r}
+autoplot(usdeaths) +
+    ggtitle("Monthly accidental deaths in USA")
+
+ggseasonplot(usdeaths)
+
+ggsubseriesplot(usdeaths)
+
+gglagplot(usdeaths, lags=12)
+
+ggAcf(usdeaths)
+
+```
+
+
+```{r}
+autoplot(bricksq) +
+    ggtitle("Australian quarterly clay brick production: 1956–1994")
+
+ggseasonplot(bricksq)
+
+ggsubseriesplot(bricksq)
+
+gglagplot(bricksq, lags=12)
+
+ggAcf(bricksq)
+
+```
+
+```{r}
+autoplot(sunspotarea) +
+    ggtitle("Annual average sunspot area (1875-2015)")
+    
+# ggseasonplot(sunspotarea)
+# 
+# ggsubseriesplot(sunspotarea)
+# 
+# gglagplot(sunspotarea, lags=12)
+# 
+# ggAcf(sunspotarea)
+
+```
+
+```{r}
+autoplot(gasoline) +
+    ggtitle("US finished motor gasoline product supplied")
+    
+ggseasonplot(gasoline)
+
+# ggsubseriesplot(gasoline)
+
+gglagplot(gasoline, lags=12)
+
+ggAcf(gasoline)
+
+```
+
