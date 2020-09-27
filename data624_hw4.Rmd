@@ -1,0 +1,197 @@
+---
+title: 'Data 624 - Homework #4'
+author: "Wei Zhou"
+date: '2020-09_25'
+output:
+  html_document
+---
+
+
+Exercises 3.1 and 3.2 from the  Kuhn and Johnson book "Applied Predictive Modeling". 
+
+ 
+```{r load.requirements, warning = FALSE, message = FALSE}
+#clear the workspace
+rm(list = ls())
+#load req's packages
+library(mlbench)
+library(ggplot2)
+library(GGally)
+library(dplyr)
+library(corrplot)
+library(tidyr)
+library(psych)
+library(knitr)
+library(DMwR)
+```
+
+## Question 3.1
+
+The UC Irvine Machine Learning Repository6 contains a data set related
+to glass identification. The data consist of 214 glass samples labeled as one
+of seven class categories. There are nine predictors, including the refractive
+index and percentages of eight elements: Na, Mg, Al, Si, K, Ca, Ba, and Fe.
+
+### A - Using visualizations, explore the predictor variables to understand theirdistributions as well as the relationships between predictors.
+
+ 
+```{r message=F}
+data(Glass)
+predictors <- Glass[,1:9]
+predictors %>%
+  gather() %>% 
+  ggplot(aes(value)) +
+    facet_wrap(~ key, scales = "free") +
+    geom_histogram()+
+    ggtitle("Glass Predictor Variables - Histograms")
+predictors %>%
+  gather() %>% 
+  ggplot(aes(value)) +
+  geom_density() +
+  facet_wrap(~key, scales = 'free')+
+  ggtitle("Glass Predictor Variables - Histograms")
+pairs(predictors, main="Glass Predictor Variables - Pairs Plot")
+r <-cor(predictors)
+corrplot.mixed(r, 
+               lower.col = "black",
+               number.cex = .7,
+               title="Glass Predictor Variables - Correlation Plot",
+               mar=c(0,0,1,0))
+```
+
+From the above plots, we can see that some of the vatiables are reasonably well centered (Al, Na), some are skewed (Mg) and there are also a few that are seem to have a high proportion of zero or near-zero weights (Fe, Ba)
+
+In terms of relationships:
+* The pairs plot doesn't seem to show any glaring non-linear relationships (although... thats a lot of plots, so maybe i'm missing something...) so it's likely not unreasonable to look at a correlation plot.
+* The correlation plot tells us that Ri seems to have the highest degree of relation to other elements with Ri & CA sharing the highest positive correlation and Ri and Mg having the lowest correlation at -0.54
+
+
+### B - Do there appear to be any outliers in the data? Are any predictors skewed?
+
+```{r}
+predictors %>%
+  gather() %>% 
+  ggplot(aes(x=key,y=value,color=key)) +
+    geom_boxplot()+
+    ggtitle("Glass Predictor Variables - BoxPlot")
+pred.norm <- predictors / apply(predictors, 2, sd)
+pred.norm %>%
+  gather() %>% 
+  ggplot(aes(x=key,y=value,color=key)) +
+    geom_boxplot()+
+    scale_y_continuous()+
+    ggtitle("Normalized Glass Predictor Variables - BoxPlot")
+p <-  describe(predictors)
+ggplot(p,aes(x = row.names(p),y=skew))+
+  geom_bar(stat='identity') +
+  ggtitle("Glass Predictors - Skew")
+```
+
+In terms of the outliers, we first performed a box-plot to try to get a visual sense.  We can see right away that the variables need to be re-scales.  A simple/common recaling method is to divide by the min value however in this case, we have several vars with zero-mins and as such, we'll scale by the standard deviation.
+
+In the normalized boxplot, we can see that there ARE outliers and with the major offenders being Si, Ca and Na.
+
+In terms of skew, using the $Skew output from the describe() function, we can see that many of the variables show skewness > 1  (Ba,Ca,Fe,K,Ri).  On the negative side, Mg shows the highest skew.
+
+
+
+### C - Are there any relevant transformations of one or more predictors that might improve the classification model?
+
+Given the skewness of the data and the outliers, I suspect that transfomations will be nessecary if the intention is to use a linear model here.
+
+* Spatial sign could be used to resolve the outliers
+* Log, sqrt or Box-cox could be used to address the skew
+
+
+## Question 3.2
+
+The soybean data can also be found at the UC Irvine Machine Learning
+Repository. Data were collected to predict disease in 683 soybeans. The 35
+predictors are mostly categorical and include information on the environmental
+conditions (e.g., temperature, precipitation) and plant conditions (e.g., left
+spots, mold growth). The outcome labels consist of 19 distinct classes.
+
+### A - Investigate the frequency distributions for the categorical predictors. Are any of the distributions degenerate in the ways discussed earlier in this chapter?
+
+
+```{r }
+data(Soybean)
+#number of unique values per col
+incl.nas <- sapply(sapply(Soybean,unique),length)
+no.nas <- sapply(sapply(Soybean[complete.cases(Soybean),],unique),length)
+  
+r <- t(rbind(incl.nas,no.nas))
+row.names(r) <- colnames(Soybean)
+kable(r)
+```
+
+The table above shows the unique-value-count by variable.  Based on this table it does not appear as though there are any variables with degenerate distributions (based on the strict / literal definition of "degenerate") given that all the variables seem to have a minimum of 2 values present in the data.  There are, however, a few binary variables.  
+
+Having said that, I do suspect that there are probably some variables that have low explanatory power, or exhibit aliasing issues here, which could be removed.
+
+### B - Roughly 18% of the data are missing. Are there particular predictors that are more likely to be missing? Is the pattern of missing data related to the classes?
+
+```{r warning=F}
+Soybean.incomplete <- Soybean[!complete.cases(Soybean),]
+missing.cols <- Soybean.incomplete %>%
+  select(everything()) %>%  # replace to your needs
+  summarise_all(funs(sum(is.na(.)))) 
+missing.cols <- t(missing.cols/nrow(Soybean))
+missing.cols <- missing.cols[order(-missing.cols),]
+kable(missing.cols)
+case.count <- Soybean.incomplete %>% 
+  group_by(Class) %>%
+  tally()
+na.count <- aggregate(Soybean.incomplete, list(Soybean.incomplete$Class), function(x) sum(is.na(x)))
+case.count$NAs <- data.frame(rowSums(na.count[2:ncol(na.count)]))
+colnames(case.count) <- c("Class","Incomeplete.Cases", "NA.Values")
+case.count$NA.Per.Case <- case.count$NA.Values / case.count$Incomeplete.Cases
+kable(case.count)
+```
+
+
+
+#### Variables
+
+There does seem to be a pattern in some of the variables which are missing.
+
+* crop damage (hail, lodging, severe weather) appear to be among the most common missing variables (~18%)
+* next most common are various seed & fruit related metrics
+* 3rd monst common appear to be leaf-related metrics
+
+#### Classes
+
+Of the 19 classes, the missing data appear to be confined to only 5 distinct classes.  We see that of these, the majority of the missing data are in phytophthora-rot.  It could be that detection of this (and the other 4) condition makes further measurement unnessecary or irrelevant in some cases.
+
+For example, if I detect phytophthora-rot, maybe it is an indication that the crop is unsalvagable and thus I cease measuring for things like "hail".
+
+In addtion, if we look at the proportion of NAs to the number of incomplete cases, we see that when 2-d-4 Injury or cyst-nematode contains an NA, it is likely to contain a large number of NAs (20+ / 36 fields) whereas diaporthe-pod-&-stem-blight	shows a relatively smaller number (10/36) 
+
+### C - Develop a strategy for handling missing data, either by eliminating predictors or imputation.
+
+For this kind of problem, my gut feel is that a "one size fits all" solution is rarely optimal.  As such, we'll do a few different things here:
+
+#### Rare Exogenous Events - Impute Zeros
+
+There are several variables where I feel imputation makes no sense - we're unlikely to get sensible results if/when trying to impute rare/exogenous events like extreme weather.  For these variables, we'll assume an NA means that they didn't occur and impute zeros
+
+```{r}
+Soybean$hail[is.na(Soybean$hail)] <- 0
+Soybean$sever[is.na(Soybean$hail)] <- 0
+```
+
+#### Remaining Data - Knn Impute
+
+For the remaining data we'll use KNN (k=10) to impute.  Note that we're using the mode rather than an average as all of these variables appear to be discreet.
+
+```{r}
+df <- data.frame(Soybean)
+Soybean.impute <- knnImputation(df, k = 10, scale = T, meth = "mode",
+              distData = NULL)
+nrow(Soybean.impute[!complete.cases(Soybean.impute),])
+```
+
+We can see that the number of incomplete cases is now 0.
+
+Upon further reflection, my gut feel is that it would make even more sense to impute data by class as we might expect to find more similarities within a class than between classes.  This would be my next step if i was to continue.
+

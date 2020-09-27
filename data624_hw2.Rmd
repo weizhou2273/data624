@@ -1,0 +1,179 @@
+---
+title: 'Data 624 - Homework #2'
+author: "Wei Zhou"
+date: '2020-09-16'
+output:
+  html_document
+---
+
+
+Exercises 3.1, 3.2, 3.3 and 3.8 from the Hyndman online Forecasting book.
+ 
+```{r load.requirements, warning = FALSE, message = FALSE}
+#clear the workspace
+rm(list = ls())
+#load req's packages
+library(forecast)
+library(readxl)
+library(RCurl)
+library(fpp2)
+library(gridExtra)
+library(grid)
+library(CombMSC)
+```
+
+## Question 3.1
+
+For the following series, find an appropriate Box-Cox transformation in order to stabilise the variance.
+
+* usnetelec
+* usgdp
+* mcopper
+* enplanements
+
+```{r apply.boxcox}
+bc.transform <- function(data,series.name) {
+  #plot original data
+  p1 <- autoplot(data,main=paste0("Original data for ",series.name))
+  #find lambda
+  (lambda <- BoxCox.lambda(data))
+  #plot the transformed data
+  p2 <- autoplot(BoxCox(data,lambda),
+                 main=paste0(series.name, " transform with Lambda = ",
+                             round(lambda,2)))
+    print(paste0("An appropriate variance stabilizing Box-Cox transformation for ", series.name, " is ", round(lambda,2) ))
+  grid.arrange(p1, p2)
+}
+```
+
+### usnetelec
+```{r usnetelec}
+bc.transform(usnetelec,"usnetelec")
+```
+
+### US GDP
+```{r US.GDP}
+bc.transform(usgdp,"US GDP")
+```
+
+### mcopper
+```{r mcopper}
+bc.transform(mcopper,"mcopper")
+```
+
+### enplanements
+```{r enplanements}
+bc.transform(enplanements,"enplanements")
+```
+
+
+## Question 3.2
+
+Why is a Box-Cox transformation unhelpful for the cangas data?
+
+```{r more.boxcox}
+bc.transform(cangas,"Cangas")
+(lambda <- BoxCox.lambda(cangas))
+p1 <- autoplot(diff(cangas,lag=3),main = "Cangas - Quarterly Change")
+p2 <- autoplot(diff(BoxCox(cangas,lambda),lag=3),main = "Cangas - BoxCox Trabsformed Quarterly Change")
+grid.arrange(p1, p2)
+  
+```
+The box-cox transformaiton is unhelpful because it does not seem to provide any effect in terms of variance standardization / stabilization.  I suspect that this is because of the nature of the data.  We appear to have 3 regimes, as is evident in the quarterly change plots.
+
+* moderate variance regime for approx the first 1/3rd of the data
+* high variance for the mid-regime
+* low variance for the last 3rd
+
+My hunch is that these 3 regimes represent totally different distributions thus Box-Cox is ineffective.  If we were to perform a piece-wise Box-Cox by 3rds of the data, my suspicion is that it would be more effective.
+
+## Question 3.3
+
+What Box-Cox transformation would you select for your retail data (from Exercise 3 in Section 2.10)?
+
+```{r}
+#borrowed code from last week's hw to load the aussie retail data
+temp_file <- tempfile(fileext = ".xlsx")
+download.file(url = "https://github.com/plb2018/DATA624/raw/master/Homework1/retail.xlsx", 
+              destfile = temp_file, 
+              mode = "wb", 
+              quiet = TRUE)
+retaildata <- readxl::read_excel(temp_file,skip=1)
+aussie.retail <- ts(retaildata[,"A3349388W"],
+  frequency=12, start=c(1982,4))
+#run my function
+bc.transform(aussie.retail,"Aussie Retail")
+```
+An appropriate value for lambda to be used for the Aussie retail data series that was used for homework#1 would be 0.11.  As can be seen from the plots above, we see a reasonable smoothing of the data and the appearance of exponential growth present in the original data is significantly diminished.
+
+## Question 3.8
+
+For your retail time series (from Exercise 3 in Section 2.10):
+
+### A - Split the Data
+Split the data into two parts using:
+
+```{r}
+myts.train <- window(aussie.retail, end=c(2010,12))
+myts.test <- window(aussie.retail, start=2011)
+```
+### B - Check the split
+Check that your data have been split appropriately by producing the following plot.
+```{r}
+autoplot(aussie.retail) +
+  autolayer(myts.train, series="Training") +
+  autolayer(myts.test, series="Test")
+```
+
+### C - Calculate Forecasts 
+Calculate forecasts using snaive applied to *myts.train*.
+```{r}
+fc <- snaive(myts.train)
+```
+### D - Compare Accuracy
+Compare the accuracy of your forecasts against the actual values stored in *myts.test*.
+```{r}
+acc <- accuracy(fc,myts.test)
+```
+### E - Check Residuals
+Check the residuals.
+```{r}
+checkresiduals(fc)
+```
+There appears to be a significant amount of correlation in the residuals in this series.  Residual variance does not look constant.  The distribution of the residuals appears to be skewed to the right.  I suspect that this model is missing something (inflation adjustment?  Normalization by some measure of econ performance?)
+
+### F - Sensitivity Analysis
+How sensitive are the accuracy measures to the training/test split?
+
+```{r}
+set.seed(108)
+len <- 190
+results <- matrix(0,nrow=len,ncol=1)
+for (i in 1:len){
+  tts <- splitTrainTest(aussie.retail, numTrain = length(aussie.retail) - i)  
+  myts.train <- tts$train
+  myts.test <- tts$test
+  
+  fc <- snaive(myts.train)
+  ac <- accuracy(fc,myts.test)
+  
+  results[i] <- ac[2,2]
+  
+}
+plot(results,
+     main="RMSE as Test Sample Grows (and Train Sample Shrinks)",
+     xlab="DataPoints In Test Sample",
+     ylab="RMSE")
+plot(diff(results,lag=1),
+     main="Period-wise Delta in RMSE as Test Sample Grows",
+     xlab="DataPoints In Test Sample",
+     ylab="Change in RMSE")
+plot(diff(results,lag=1)/acc[2,2] ,
+     main="Period-wise RMSE Delta As a Proportion of Test RMSE",
+     xlab="DataPoints In Test Sample",
+     ylab="Change in RMSE")
+```
+
+Here we look at how RMSE (just to pick one of the measures of model accuracy) varies as we modify the train/test split.  Here we look at an out-sample size of 1 to 190 (where 1 == a single point &  190 == half of the data).  We can see that the RMSE varies dramatically as the relative split changes and as such, we can conclude that yes, the accuracy measures are quite sensitive in this case.
+
+The third plot shows the difference in RMSE as the test sample grows as a proportion of the original test RMSE.  As we can see, the differences are as much as 40%.
