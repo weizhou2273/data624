@@ -1,0 +1,425 @@
+---
+title: 'Data 624 - Homework #6'
+author: "Wei Zhou"
+date: '2020-10-17'
+---
+
+
+Exercises 8.1, 8.2, 8.3, 8.5, 8.6 and 8.7  from the Hyndman online Forecasting book. 
+ 
+```{r load.requirements, warning = FALSE, message = FALSE}
+#clear the workspace
+rm(list = ls())
+#load req's packages
+library(fpp2)
+library(knitr)
+library(tseries)
+library(knitr)
+```
+
+
+## Question 8.1 
+Figure 8.31 shows the ACFs for 36 random numbers, 360 random numbers and 1,000 random numbers.
+
+### A) Explain the differences among these figures. Do they all indicate that the data are white noise?
+
+The figures indicate that the data is white noise given that there are no observations outside of the critical values.  The main difference appears to be the width of the limits which is driven by the sample size. 
+
+### B) Why are the critical values at different distances from the mean of zero? Why are the autocorrelations different in each figure when they each refer to white noise?
+
+As mentioned in the response to part A, as the sample size grows, confidence is higher and thus the critical values decrease. The relationship is: $\pm1.96/\sqrt{N}$, which makes it pretty clear that as N grows, the critical value will decrease.   
+
+
+## Question 8.2 
+A classic example of a non-stationary series is the daily closing IBM stock price series (data set ibmclose). Use R to plot the daily closing prices for IBM stock and the ACF and PACF. Explain how each plot shows that the series is non-stationary and should be differenced.
+
+```{r}
+data(ibmclose)
+ggtsdisplay(ibmclose)
+ibmclose.diff <- diff(ibmclose)
+ggtsdisplay(ibmclose.diff)
+```
+
+
+#### Timeseries
+The timeseries itself doesn't look stationary.  It appears to have a piece-wise drifting behaviour, non-constant variability, and it doesn't appear to osscilate around a central value as we might expect from a stationary series.  Essentially right now, the series is a cumsum() of daily price changes - we want to see the series of changes, which will oscillate around zero and appear much more stationary.  
+#### ACF
+The ACF series shows that at all lags presented, the observed correlation is well above the critical values.  This suggests that the samples are not independent and differencing may help break this relationship.
+#### PCAF
+The PACF shows that the relationship between the series and that, specifically for a 1-period lag, the relationship appears to be extremely high.  Similarl to the ACF, this suggests that there is information in the lagged series and thus it is not independent.
+
+#### Let's look at the diff
+
+```{r}
+ibmclose.diff <- diff(ibmclose)
+ggtsdisplay(ibmclose.diff)
+```
+
+We can see that if we DO difference the data, we get much better resutls. The data, however, while much closer to stationarity,  is not perfect. This is likely as a result of time-varying variance of the series (between 0-100 and 200-300 look very different, for example)
+
+
+## Question 8.3
+For the following series, find an appropriate Box-Cox transformation and order of differencing in order to obtain stationary data.
+
+
+
+### A) usnetelec
+
+The data appears to be relatively steadily increasing.  
+
+```{r}
+d <- usnetelec
+autoplot(d)
+lambda <-  BoxCox.lambda(d)
+d <- BoxCox(d,lambda)
+```
+
+
+```{r}
+order <- 2
+Box.test(diff(d,differences=order), type = "Ljung-Box")
+kpss.test(diff(d,differences=order))
+ggtsdisplay(diff(d,differences=order))
+```
+
+For this data, an appropriate lambda would be 0.52 and 2nd order differencing appears appropriate.
+
+
+### B) usgdp
+```{r}
+d <- usgdp
+autoplot(d)
+lambda <-  BoxCox.lambda(d)
+d <- BoxCox(d,lambda)
+```
+
+```{r}
+order <- 2
+Box.test(diff(d,differences=order), type = "Ljung-Box")
+kpss.test(diff(d,differences=order))
+ggtsdisplay(diff(d,differences=order))
+```
+
+
+First order differencing does not seem to be appropriate based on the above (ACF plots and KPSS).  After applying 2nd order differencing, we see an acceptable result.
+
+
+```{r}
+order <- 2
+Box.test(diff(d,differences=order), type = "Ljung-Box")
+kpss.test(diff(d,differences=order))
+ggtsdisplay(diff(d,differences=order))
+```
+
+2nd order differencing causes a pass of the KPSS test.  There still appears to be some issues with auto-correlation but overall the results are likely.  An appropriate lambda for box-cox is ~0.36
+
+
+
+### C) mcopper
+```{r}
+d <- mcopper
+autoplot(d)
+lambda <-  BoxCox.lambda(d)
+d <- BoxCox(d,lambda)
+```
+
+
+```{r}
+order <- 1
+Box.test(diff(d,differences=order), type = "Ljung-Box")
+kpss.test(diff(d,differences=order))
+ggtsdisplay(diff(d,differences=order))
+```
+
+First order differencing with a lambda of ~0.2 seems reasonably okay and probably acceptable.  I wonder if the high ACF and PACF at lag 1 have something to do with the zero-change data in the 60s... a quick test:
+
+```{r}
+d <- diff(d)
+d <- ts(d[d != 0])
+autoplot(d)
+lambda <-  BoxCox.lambda(d)
+d <- BoxCox(d,lambda)
+order <- 1
+Box.test(d, type = "Ljung-Box")
+kpss.test(d)
+ggtsdisplay(d)
+```
+
+We see a negligible change if we remove the zero entries.  As such, a first order difference with a lambda of 0.71 seem appropriate.
+
+
+
+### D) enplanements
+
+These data are clearly showing a seasonal pattern so we will need to adjust for that.
+
+
+```{r}
+d <- enplanements
+autoplot(d)
+lambda <-  BoxCox.lambda(d)
+d <- BoxCox(d,lambda)
+```
+
+```{r}
+order <- 1
+lag <- 12
+Box.test(diff(diff(d,differences=order),lag=lag), type = "Ljung-Box")
+kpss.test(diff(diff(d,differences=order),lag=lag))
+ggtsdisplay(diff(diff(d,differences=order),lag=lag))
+```
+
+
+
+We can see that the appropriate value for lambda is ~-0.23.  First order differencing was required as well as a 12-period lagged differencing to account for annual seasonality.  Doing this, we get an acceptable KPSS result.
+
+
+
+
+### E) visitors
+
+This data appears to be similar to that of the last problem as as such, we'll try the exact same technique (1st order diff, 12-period diff)
+
+```{r}
+d <- visitors
+autoplot(d)
+lambda <-  BoxCox.lambda(d)
+d <- BoxCox(d,lambda)
+```
+
+```{r}
+order <- 1
+lag <- 12
+Box.test(diff(diff(d,differences=order),lag=lag), type = "Ljung-Box")
+kpss.test(diff(diff(d,differences=order),lag=lag))
+ggtsdisplay(diff(diff(d,differences=order),lag=lag))
+```
+
+With a lambda of o.28 and using a first order diff and a 12-period correction for seasonality, we get a result that looks acceptably stationary.
+
+
+## Question 8.5 
+For your retail data (from Exercise 3 in Section 2.10), find the appropriate order of differencing (after transformation if necessary) to obtain stationary data.
+
+```{r}
+#borrowed code from hw
+temp_file <- tempfile(fileext = ".xlsx")
+download.file(url = "https://github.com/plb2018/DATA624/raw/master/Homework1/retail.xlsx", 
+              destfile = temp_file, 
+              mode = "wb", 
+              quiet = TRUE)
+retaildata <- readxl::read_excel(temp_file,skip=1)
+aussie.retail <- ts(retaildata[,"A3349388W"],
+  frequency=12, start=c(1982,4))
+autoplot(aussie.retail)
+lambda <-  BoxCox.lambda(d)
+d <- BoxCox(d,lambda)
+order <- 1
+lag <- 12
+Box.test(diff(diff(d,differences=order),lag=lag), type = "Ljung-Box")
+kpss.test(diff(diff(d,differences=order),lag=lag))
+ggtsdisplay(diff(diff(d,differences=order),lag=lag))
+```
+
+Yet again, this data looks similar to parts "D" and "E" from the question above.  If we apply the same technique as for those series, we get an acceptable result (KPSS @ 0.016)
+
+
+
+## Question 8.6 
+Use R to simulate and plot some data from simple ARIMA models.
+
+### A) Use the following R code to generate data from an AR(1) model with  $\phi_1 = 0.6$ and $\sigma^2 = 1$ The process starts with $y1 = 0$
+
+```{r}
+#from the problem
+y <- ts(numeric(100))
+e <- rnorm(100)
+for(i in 2:100){
+   y[i] <- 0.6*y[i-1] + e[i]
+}
+autoplot(ts(y))
+```
+
+
+### B) Produce a time plot for the series. How does the plot change as you change $\theta_1$
+
+```{r}
+my.arima <- function(p){
+  y <- ts(numeric(100))
+  e <- rnorm(100)
+  for(i in 2:100){
+    y[i] <- p*y[i-1] + e[i]
+  }
+  return(y)
+}
+#empty mat
+out <- matrix(0, nrow = 100, ncol = 4)
+#create some data for diff values of p
+for(i in 1:4){
+  out[1:100,i] <- my.arima(i*0.2)
+}
+#plot
+colnames(out) <- c("0.2","0.4","0.6","0.8")
+autoplot(ts(out)) +guides(colour = guide_legend(title = "Phi"))
+```
+
+### C) Write your own code to generate data from an MA(1) model with $\theta_1 = 0.6$ and $\sigma^2 = 1$  
+
+```{r}
+my.ma <- function(t){
+  y <- ts(numeric(100))
+  e <- rnorm(100)
+  for(i in 2:100){
+    y[i] <- t*e[i-1] + e[i]
+  }
+  return(y)
+}
+ma <- my.ma(0.6)
+autoplot(ts(ma))
+```
+
+### D) Produce a time plot for the series. How does the plot change as you change  $\phi_1$
+
+```{r}
+#empty mat
+out <- matrix(0, nrow = 100, ncol = 4)
+#create some data for diff values of p
+for(i in 1:4){
+  out[1:100,i] <- my.ma(i*0.2)
+}
+#plot
+colnames(out) <- c("0.2","0.4","0.6","0.8")
+autoplot(ts(out)) +guides(colour = guide_legend(title = "Theta"))
+```
+
+### E) Generate data from an ARMA(1,1) model with  $\phi_1 = 0.6$,$\theta_1 = 0.6$ and $\sigma^2 = 1$
+
+```{r}
+y <- ts(numeric(100))
+e <- rnorm(100)
+for(i in 2:100)
+  y[i] <- 0.6*y[i-1] + 0.6*e[i-1] + e[i]
+arima11 <- y
+autoplot(arima11) +
+  ggtitle('ARMA(1,1)')
+```
+
+
+### F) Generate data from an AR(2) model with $\phi_1 = -0.8$, $\phi_2=0.3$ and $\sigma^2=1$.(Note that these parameters will give a non-stationary series.) 
+
+```{r}
+y <- ts(numeric(100))
+e <- rnorm(100)
+for(i in 3:100)
+  y[i] <- -0.8*y[i-1] + 0.3*y[i-2] + e[i]
+ar2 <- y
+autoplot(ar2) +
+  ggtitle('AR2')
+```
+
+### G) Graph the latter two series and compare them.
+
+```{r}
+autoplot(arima11, series = "ARMA(1, 1)") +
+  autolayer(ar2, series = "AR(2)") +
+  ylab("y value") +
+  guides(colour = guide_legend(title = "Model"))
+```
+
+
+## Question 8.7 
+Consider wmurders, the number of women murdered each year (per 100,000 standard population) in the United States.
+
+### A) By studying appropriate graphs of the series in R, find an appropriate ARIMA(p,d,q) model for these data
+```{r}
+d <- wmurders
+ggtsdisplay(d)
+```
+
+
+The data is not stationary according to visual inspection. Observations:
+* The data exhibits piece-wise trending behaviour, flat, then up , then flat, then down.
+* The data exhibit a high degree of auto-correlation, especially at shorter lags.
+* The PCAF looks a bit better, but still shows a very value at the first lag.
+* There is no obvious seasonality or cyclicality in the data.
+* The variability seems reasonably constant (better seen below) and as such, no BoxCox is nessecary
+
+Next we'll look at the differenced data:
+
+```{r}
+n <- 2
+ggtsdisplay(diff(d,difference=n))
+kpss.test(diff(d,difference=n))
+```
+
+We pass the KPSS test for stationarity using a 2nd order difference as above.
+
+Based on the above, we can see that:
+*We have the appearance of a sinusoidal patter in the ACF
+*We see a large spike in PACF at lag=1
+*We will use ARIMA(p,d,o) -> ARIMA(1,2,1)
+
+
+### B) Should you include a constant in the model? Explain.
+
+We have a model where d=2 so adding a constant will add a quadratic trend to the data.  Given that the data represents the proportion of women murdered adding a constant seems inapproriate to me.
+
+### C) Write this model in terms of the backshift operator.
+
+In backshift operator terms, the model would be:
+
+$(1-\phi_1B)(1-B)^2y_t = (1+\phi_1B)\varepsilon_t$  (ommiting the constant term)
+
+
+
+
+### D) Fit the model using R and examine the residuals. Is the model satisfactory?
+
+```{r}
+my.arima <- Arima(wmurders, order=c(1,2,1))
+checkresiduals(my.arima)
+```
+
+The model appears to be a decent fit based on the both the ACF plot and the distribution of residuals.  The ACF values are all well within the critical values and the distribution of resituals is normal.  This model is valid and acceptable.
+
+### E) Forecast three times ahead. Check your forecasts by hand to make sure that you know how they have been calculated.
+
+```{r}
+f<- forecast(my.arima,h=3)
+f
+```
+
+Check:
+```{r}
+#req's inputs
+recent <- tail(d,3)
+residual <- tail(residuals(my.arima),1)
+#model params
+ar1 <- my.arima$coef[1]
+ma1 <- my.arima$coef[2]
+#compute each year manually
+y1 <- 1.7566 * recent[3] - 0.5132  * recent[2] + ar1 * recent[1] + ma1 * residual
+y2 <- 1.7566 * y1[1]- 0.5132  * recent[3] + ar1 * recent[2] + ma1 * 0
+y3 <- 1.7566 * y2[1] - 0.5132  * y1[1] + ar1 * recent[3] + ma1 * 0
+check <- data.frame(cbind(f$mean, c(y1,y2,y3)))
+colnames(check) <- c("Model","Manual")
+kable(check)
+```
+
+The values are nearly identical with differences likely attributable to precision effects.
+
+
+### F) Create a plot of the series with forecasts and prediction intervals for the next three periods shown.
+
+```{r}
+autoplot(forecast(my.arima, h=3))
+```
+
+### G) Does auto.arima() give the same model you have chosen? If not, which model do you think is better?
+
+```{r}
+not.my.arima <- auto.arima(wmurders, seasonal=F, stepwise=F, approximation=F)
+autoplot(forecast(not.my.arima, h=3))
+```
+
+The bounds from the auto-arima model are slightly tigheter and it appears to introduce a slight variability into the trend, whereas my model produces more or less a straight line.  The confidence bounds for the auto-arima allow for a reversal in the trend (i.e. they show more of a positive bias) vs. my model which seems prudent.  Given that this is mostly new material to me, I will assume that auto.arima produces better models than I do at this point.  Practically speaking, however, the 3-period forcasts aren't too different and if one is approximately correct, the other will be too.
