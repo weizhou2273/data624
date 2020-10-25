@@ -1,0 +1,480 @@
+---
+title: 'Data 624 - Project 1'
+author: "Wei Zhou"
+date: '2020-10-25'
+
+---
+
+# Project 1 
+
+
+The rpubs version of this work can be found[here](https://rpubs.com/plb_lttfer/591649), and source/data can be found on github [here](https://github.com/plb2018/DATA624/tree/master/project1).
+ 
+## Description
+
+This project consists of 3 parts - two required and one bonus and is worth 15% of your grade.  The project is due at 11:59 PM on Sunday March 31.  I will accept late submissions with a penalty until the meetup after that when we review some projects.
+
+```{r load.packages, message=FALSE, warning=FALSE}
+rm(list = ls())
+library(knitr)
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+library(tseries)
+library(forecast)
+library(lubridate)
+library(tidyverse)
+```
+
+## Load Data
+
+Load all the data for all 3 parts from github in the interest of reproducibility.
+
+```{r load.data, warning=FALSE}
+temp_file <- tempfile(fileext = ".xlsx")
+download.file(url = "https://github.com/plb2018/DATA624/raw/master/project1/ATM624Data.xlsx?raw=true", 
+              destfile = temp_file, 
+              mode = "wb", 
+              quiet = TRUE)
+ATM <- readxl::read_excel(temp_file,skip=0,col_types = c("date","text","numeric"))
+download.file(url = "https://github.com/plb2018/DATA624/raw/master/project1/ResidentialCustomerForecastLoad-624.xlsx?raw=true", 
+              destfile = temp_file, 
+              mode = "wb", 
+              quiet = TRUE)
+power <- readxl::read_excel(temp_file,skip=0,col_types = c("numeric","text","numeric"))
+download.file(url = "https://github.com/plb2018/DATA624/raw/master/project1/Waterflow_Pipe1.xlsx?raw=true", 
+              destfile = temp_file, 
+              mode = "wb", 
+              quiet = TRUE)
+water1 <- readxl::read_excel(temp_file,skip=0,col_types = c("date","numeric"))
+download.file(url = "https://github.com/plb2018/DATA624/raw/master/project1/Waterflow_Pipe2.xlsx?raw=true", 
+              destfile = temp_file, 
+              mode = "wb", 
+              quiet = TRUE)
+water2 <- readxl::read_excel(temp_file,skip=0,col_types = c("date","numeric"))
+```
+
+
+## Part A – ATM Forecast
+
+In part A, I want you to forecast how much cash is taken out of 4 different ATM machines for May 2010.  The data is given in a single file.  The variable ‘Cash’ is provided in hundreds of dollars, other than that it is straight forward.   I am being somewhat ambiguous on purpose to make this have a little more business feeling.  Explain and demonstrate your process, techniques used and not used, and your actual forecast.  I am giving you data via an excel file, please provide your written report on your findings, visuals, discussion and your R code via an RPubs link along with the actual.rmd file  Also please submit the forecast which you will put in an Excel readable file.
+
+
+First we'll inspect the data to see if we can gain any intuition about what we are working with.
+
+### Inspect the Data
+
+We find a few missing values
+* 3 cases where we have no Cash values for ATM1 and 2 cases for ATM2, which we will impute after further investigation
+* The entire month of may is missing as this is what we are asked to forcast.
+ 
+```{r}
+ATM[!complete.cases(ATM),]
+p <- ggplot(ATM[complete.cases(ATM),],aes(x=DATE,y=Cash,color=ATM))+
+  geom_line()
+p + facet_grid(rows = vars(ATM),scales="free")
+p <- ggplot(ATM[complete.cases(ATM),],aes(x=Cash,color=ATM))+
+  geom_histogram()
+p + facet_grid(cols = vars(ATM),scales="free")
+```
+
+From plotting the data, we can see that ATM1 and ATM2 look roughly similar in terms of withdrawls and cyclicality / seasonality.   ATM3 appears as though it has just come "on-line" and thus has almost no history.
+
+For ATM 1 we see a bi-modal distribution with peaks near 20 and 200 whereas for ATM2 we see a more constant/uniform distribution.  
+
+ATM4 has several oddities.  First, we see a monstrous outlier value of 10919.76.  Given that these values are in 100s, the outlier equates to > $1 Million, which is substantially more than ATMs typically hold - quick googling suggests that most ATMs carry about 10K and the max is around 200K - so something is wrong here. Common sense (based on context) dictates that this outlier is likely an error.  I also note that the data from ATM4 are not integers which is odd as ATMs only dispense bills.  I wonder whether this data is from an ATM that dispenses non-USD, yet is reported in USD or something similar...
+
+
+### Check for Seasonality / Cyclicality
+
+
+We will eliminate the massive outlier from ATM4, and examine the data for any seasonal / cyclical patterns
+
+```{r, warning=FALSE}
+#drop the outlier
+ATM2 = ATM[ATM$Cash < 9500,]
+#add a weekday col
+ATM2$weekday <- factor(weekdays(as.Date(ATM2$DATE)))
+#reorder levels
+ATM2$weekday <- ordered(ATM2$weekday,levels = c("Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"))
+#drop nas for now
+ATM2 <- ATM2[complete.cases(ATM2),]
+#rescale AMT 4, for plotting
+ATM2$Cash[ATM2$ATM == "ATM4"] <- ATM2$Cash[ATM2$ATM == "ATM4"]/5
+ggplot(ATM2[complete.cases(ATM2),],aes(x=weekday,y=Cash,color=ATM))+
+  geom_boxplot()+
+  ggtitle("ATM Cyclicality")
+```
+
+From the above plots we can see that there is a weekly cycle where Thursday appears to have dramatically lower withdrawls than all other days.  Note that in this plot, ATM4 has been re-scaled to make the visualization easier on the eyes.
+
+
+### Impute Missing Values
+
+Given that the day-of-week appears to be important, we will use this data when imputing missing values.  We will impute using the median values for the week-day of eash missing data-point. As can be seen below, a missing "Thursday" probably warrants a different value than a missing "Saturday" 
+ 
+```{r}
+medians.by.weekday <- ATM2 %>%
+    group_by(weekday,ATM) %>%
+    summarise_at(vars(-DATE), funs(median(., na.rm=TRUE)))
+ggplot(medians.by.weekday,aes(x=weekday,y=Cash,color=ATM,group=ATM,fill=ATM))+
+  geom_bar(stat="identity",position="dodge")+
+  ggtitle("Values For Imputation")
+```
+
+Given that there are so few missing values, we'll perform the imputation manually.  If there were substantially more, or expected to be substantially more in the future, we would obviously build a more efficient process to handle this.
+
+
+```{r}
+ATM$weekday <- factor(weekdays(as.Date(ATM$DATE)))
+missing.values <- head(ATM[is.na(ATM$Cash) ,],5)
+kable(missing.values,caption = "The Missing Values with Weekdays")
+#grab index for missing values
+missing.idx <- head(which(is.na(ATM$Cash)),5)
+#manually replace each one
+ATM$Cash[missing.idx[1]]<- medians.by.weekday$Cash[(medians.by.weekday$weekday=="Saturday") & (medians.by.weekday$ATM == "ATM1")]
+ATM$Cash[missing.idx[2]] <- medians.by.weekday$Cash[(medians.by.weekday$weekday=="Tuesday") & (medians.by.weekday$ATM == "ATM1")]
+ATM$Cash[missing.idx[3]] <- medians.by.weekday$Cash[(medians.by.weekday$weekday=="Thursday") & (medians.by.weekday$ATM == "ATM2")]
+ATM$Cash[missing.idx[4]] <- medians.by.weekday$Cash[(medians.by.weekday$weekday=="Monday") & (medians.by.weekday$ATM == "ATM1")]
+ATM$Cash[missing.idx[5]] <- medians.by.weekday$Cash[(medians.by.weekday$weekday=="Wednesday") & (medians.by.weekday$ATM == "ATM2")]
+ATM$Cash[ATM$Cash > 9000]  <- medians.by.weekday$Cash[(medians.by.weekday$weekday=="Tuesday") & (medians.by.weekday$ATM == "ATM4")]
+#check updated values
+kable( ATM[missing.idx,],caption = "The Imputed Values")
+```
+
+### Split the data into 4 Timeseries, Build Models
+
+The characteristics of the ATMs seem distinct enough that they could be modelled as 4 separate processes.  Given more time, I would likley try to tackle this as a more generalized "N-in, 1 out" so that i could make use of ALL the ATM data for each prediction, but i have not done that here.
+
+#### ATM1
+
+```{r}
+ATM1 <- ATM[ATM$ATM == "ATM1",]
+ATM1 <- ts(ATM1[c("Cash")])
+ggtsdisplay(ATM1, points = FALSE, 
+            main = "Activity for ATM1",
+            xlab = "Day",
+            ylab = "Withdrawls (000's)")
+```
+
+The weekly cycle is quite apparent in all 3 of the above plots and the relevant period is 7-days (i.e. thursdays appear to show a major slowdown in activity).  We'll difference using a lag of 7-periods and rub some stationarity tests  
+
+
+```{r}
+ATM1 <- ATM[ATM$ATM == "ATM1",]
+ATM1 <- ATM1[complete.cases(ATM1),]
+ATM1 <- ts(ATM1[c("Cash")],frequency = 7)
+ggtsdisplay(ATM1, 
+            main = "Activity for ATM1",
+            xlab = "Day",
+            ylab = "Withdrawls (000's)")
+Box.test(diff(ATM1,lag=7), type = "Ljung-Box")
+kpss.test(diff(ATM1,lag=7))
+ggtsdisplay(diff(ATM1,lag=7), 
+            main = "ATM1 - Diff, Lag=7",
+            xlab = "Day",
+            ylab = "")
+```
+
+Based on kpss output the series appears stationary so we will move onto the modelling part.
+
+
+The Spike at lag=1 suggests an MA component and the large spike at lag=7 is consistent with the seasonal component we've already discussed.  The variability looks reasonably stable but we'll run a BoxCox anyway just to be sure.
+
+We use auto.arima to search a model-space and return an appropriate model:
+
+
+```{r}
+lambda = BoxCox.lambda(ATM1)
+ATM1.arima <- auto.arima(ATM1,approximation = F,lambda = lambda)
+checkresiduals(ATM1.arima)
+ATM1.arima %>% forecast(h=31) %>% autoplot()
+kpss.test(resid(ATM1.arima))
+```
+
+The model looks reasonably good with the residuals approximately normally distributed (albiet with some left skew) and the ACF values all in-bounds.  The forcast plot also looks reasonable to me.
+
+
+
+#### ATM2
+
+Given the similarity between ATM1 & ATM2, we'll follow more-or-less the same process.
+
+```{r}
+ATM2 <- ATM[ATM$ATM == "ATM2",]
+ATM2 <- ATM2[complete.cases(ATM2),]
+ATM2 <- ts(ATM2[c("Cash")],frequency = 7)
+ggtsdisplay(ATM1, 
+            main = "Activity for ATM2",
+            xlab = "Day",
+            ylab = "Withdrawls (000's)")
+Box.test(diff(ATM1,lag=7), type = "Ljung-Box")
+kpss.test(diff(ATM1,lag=7))
+ggtsdisplay(diff(ATM1,lag=7), 
+            main = "ATM2 - Diff, Lag=7",
+            xlab = "Day",
+            ylab = "")
+```
+
+
+
+```{r}
+lambda = BoxCox.lambda(ATM2)
+ATM2.arima <- auto.arima(ATM2,approximation = F,lambda = lambda)
+checkresiduals(ATM2.arima)
+ATM2.arima %>% forecast(h=31) %>% autoplot()
+kpss.test(resid(ATM2.arima))
+```
+
+The model for ATM2 looks reasonable as well - resituals appear to be random, the ACF is more-or-less entirely in-bounds and the distribution of residuals is normal.  The model parameters are slightly different from those of ATM1
+
+
+#### ATM3
+
+ATM 3 poses a bit of a tricky problem.  We have almost no data and thus nothing to model.  However, the limited data that we DO have appears reasonably similar to that of ATM1 and ATM2 so rather than having no forecast or using a fixed value or similar, we will use the mean of ATM1 and ATM2.  I feel this is appropriate because we know ATM3 is, in fact, an ATM (which tells us a lot!) and that the limited data we have looks similar to a few other ATMs we know something about.
+
+```{r}
+ATM3 <- (ATM1 + ATM2) /2
+ggtsdisplay(ATM1, 
+            main = "Activity for ATM3 (Proxy)",
+            xlab = "Day",
+            ylab = "Withdrawls (000's)")
+Box.test(diff(ATM1,lag=7), type = "Ljung-Box")
+kpss.test(diff(ATM1,lag=7))
+ggtsdisplay(diff(ATM1,lag=7), 
+            main = "ATM3 (Proxy) - Diff, Lag=7",
+            xlab = "Day",
+            ylab = "")
+lambda = BoxCox.lambda(ATM3)
+ATM3.arima <- auto.arima(ATM3,approximation = F,lambda = lambda)
+checkresiduals(ATM3.arima)
+ATM3.arima %>% forecast(h=31) %>% autoplot()
+kpss.test(resid(ATM3.arima))
+```
+
+
+
+#### ATM4
+
+```{r}
+ATM4 <- ATM[ATM$ATM == "ATM4",]
+ATM4 <- ATM4[complete.cases(ATM4),]
+ATM4 <- ts(ATM4[c("Cash")],frequency = 7)
+ggtsdisplay(ATM1, 
+            main = "Activity for ATM4",
+            xlab = "Day",
+            ylab = "Withdrawls (000's)")
+Box.test(diff(ATM1,lag=7), type = "Ljung-Box")
+kpss.test(diff(ATM1,lag=7))
+ggtsdisplay(diff(ATM1,lag=7), 
+            main = "ATM4 - Diff, Lag=7",
+            xlab = "Day",
+            ylab = "")
+```
+```{r}
+lambda = BoxCox.lambda(ATM4)
+ATM4.arima <- auto.arima(ATM4,approximation = F,lambda = lambda)
+checkresiduals(ATM4.arima)
+ATM4.arima %>% forecast(h=31) %>% autoplot()
+kpss.test(resid(ATM4.arima))
+```
+
+#### Output the Predictions
+
+Below is a table containing the predictions for each ATM
+
+```{r}
+atm1.f <- ATM1.arima %>% forecast(h=31)
+atm2.f <- ATM2.arima %>% forecast(h=31)
+atm3.f <- ATM3.arima %>% forecast(h=31)
+atm4.f <- ATM4.arima %>% forecast(h=31)
+ATM.f <- cbind(atm1.f$mean,atm2.f$mean,atm3.f$mean,atm4.f$mean)
+colnames(ATM.f) <- c("ATM1","ATM2","ATM3","ATM4")
+row.names(ATM.f) <- as.Date(seq.Date(as.Date("2010/5/1"),by="day",length.out=31),format = "%Y-%m-%d")
+kable(ATM.f)
+write.csv(ATM.f,"ATM_predictions.csv")
+```
+
+
+
+
+## Part B – Forecasting Power
+
+ 
+
+Part B consists of a simple dataset of residential power usage for January 1998 until December 2013.  Your assignment is to model these data and a monthly forecast for 2014.  The data is given in a single file.  The variable ‘KWH’ is power consumption in Kilowatt hours, the rest is straight forward.    Add this to your existing files above. 
+
+
+### Inspect the data
+ 
+```{r}
+#quick inspection and check for missing data
+kable(tail(power))
+kable(power[!complete.cases(power),])
+power.ts <-ts(power$KWH, start = c(1998, 1), frequency = 12)
+autoplot(power.ts )
+ggseasonplot(power.ts )
+ggsubseriesplot(power.ts )
+gglagplot(power.ts )
+ggAcf(power.ts )
+```
+ 
+ We see only 1 missing case in the table above (sept 2008) which we can interpolate using the mean sept values based on what we see above.  We also see an extreme value in july 2010.
+ 
+We can see from the time series plot that the data has no major long-term trend and reasonably stable variability, tho there is an indication that the amplitude may be increasing post-2010.  There is a pronounced seasonality visible in the timeseries plot and more specifically, the seasonal plot - summer and winter equate to higher power consumption than do fall and spring. 
+
+The seasonality is also abundantly clear in the ACF plot.
+
+The seasonality and lag both suggest that we want to use a 12 month lag when evaluating this data.  We will also try a BoxCox transformation given that the variability appears to be picking up towards the end of the series
+
+### Impute missing value & Winsorize
+
+We'll fix the missing value and also winsorize the data to see if there is any way we can reduce that extreme value from July 2010.
+
+```{r}
+#find missing idx
+idx <- which(!complete.cases(power))
+#collect all values from same month
+sept.kwh <- power$KWH[seq.int(9, length(power$KWH), 12L)]
+#compute mean and inject
+power$KWH[idx] <- mean(sept.kwh,na.rm = T)
+#power$KWH <- Winsorize(power$KWH )
+#rebuild the TS
+power.ts <-ts(power$KWH, start = c(1998, 1), frequency = 12)
+```
+
+
+### More Data Work
+
+```{r}
+power.ts.l <- BoxCox(power.ts, BoxCox.lambda(power.ts))
+ggtsdisplay(diff(power.ts.l,order=1,lag=12), main = "KWH Consumption - 2nd order Differenced w/ Lag= 12")
+kpss.test(diff(power.ts.l,order=1,lag=12))
+```
+ 
+ The data are now stationary as per the KPSS test.  We see lag=12 as a stand-out in both the ACF and PACF.
+
+```{r}
+lambda = BoxCox.lambda(power.ts)
+power.arima <- auto.arima(power.ts,approximation = F,lambda = lambda)
+checkresiduals(power.arima )
+power.arima %>% forecast(h=12) %>% autoplot()
+kpss.test(resid(power.arima))
+```
+
+Based on the residual plots above the model seems to be reasonably good!  The fly in the ointment seem to be that major outlier month in July 2010.  The ACF is mostly in-bounds and the distribution of residuals is mostly normal, however there is significant left-skew as a result of the the outlier in the data.
+
+### Output predictions
+
+```{r}
+power.f <-power.arima %>% forecast(h=12)
+power.f <- data.frame(power.f$mean)
+colnames(power.f) <- "KWH"
+row.names(power.f) <- as.Date(seq.Date(as.Date("2014/1/1"),by="month",length.out=12),format = "%Y-%m")
+kable(power.f)
+write.csv(power.f,"Power_predictions.csv")
+```
+
+
+## Part C – BONUS, optional (part or all)
+ 
+
+Part C consists of two data sets.  These are simple 2 columns sets, however they have different time stamps.  Your optional assignment is to time-base sequence the data and aggregate based on hour (example of what this looks like, follows).  Note for multiple recordings within an hour, take the mean.  Then to determine if the data is stationary and can it be forecast.  If so, provide a week forward forecast and present results via Rpubs and .rmd and the forecast in an Excel readable file. 
+
+### Prepare the data
+
+```{r}
+head(water1)
+head(water2)
+#join them
+water <- rbind(water1,water2)
+#sort data
+water <- water[order(as.Date(water$`Date Time`, format="%Y-m%-d% h%:M%:s%")),]
+#aggragate by hour and take mean...
+water <- water %>%
+  separate(`Date Time`, into = c("date", "time"), sep = " ") %>%
+  separate(time, into = c("hour", "minute", "seccond"), sep = ":") %>%
+  group_by(date, hour) %>%
+  summarise(mean(WaterFlow,na.rm = T)) %>%
+  ungroup() %>%
+  arrange() %>%
+  collect() %>%
+  `colnames<-`(c("date", "time", "WaterFlow"))
+#create timeseries
+water.ts <- ts(water$WaterFlow,frequency=24)
+```
+
+
+
+### Inspect the data
+
+```{r}
+autoplot(water.ts)
+ggseasonplot(water.ts,polar=T )
+ggsubseriesplot(water.ts )
+gglagplot(water.ts )
+ggAcf(water.ts )
+```
+
+
+There's an obvious change in variability at around day 12 which sticks out like a sore thumb.  Otherwise, we see that there is no clear seasonal pattern and that the ACF is generally positive out to 48 lags.
+
+On closer inspection, it appears as though the data from the 2 sets are quite different in terms of magnitude.  In order to deal with the apparent jump in variance, i'm going to scale "water1" by the ratio of water2/water1
+
+```{r}
+scale.factor <- sd(water2$WaterFlow)/sd(water1$WaterFlow)
+water1$WaterFlow <- water1$WaterFlow * scale.factor
+#join them
+water <- rbind(water1,water2)
+#sort data
+water <- water[order(as.Date(water$`Date Time`, format="%Y-m%-d% h%:M%:s%")),]
+#aggragate by hour and take mean...
+water <- water %>%
+  separate(`Date Time`, into = c("date", "time"), sep = " ") %>%
+  separate(time, into = c("hour", "minute", "seccond"), sep = ":") %>%
+  group_by(date, hour) %>%
+  summarise(mean(WaterFlow,na.rm = T)) %>%
+  ungroup() %>%
+  arrange() %>%
+  collect() %>%
+  `colnames<-`(c("date", "time", "WaterFlow"))
+#create timeseries
+water.ts <- ts(water$WaterFlow,frequency=24)
+autoplot(water.ts)
+```
+
+
+### Transform and inspect
+
+```{r}
+water.ts.l <- BoxCox(water.ts, BoxCox.lambda(water.ts))
+ggtsdisplay(diff(water.ts.l,order=1,lag=1), main = "KWH Consumption - 2nd order Differenced w/ Lag= 12")
+kpss.test(diff(water.ts.l,order=1,lag=1))
+```
+
+We see that after a BoxCox transform and a 1st order difference with a lag of one, we get something stationary where the ACF is mostly in bounds and the PACF appears to have a well defined exponential-looking decay to zero.
+
+### Build a Model
+
+```{r}
+lambda = BoxCox.lambda(water.ts)
+water.arima <- auto.arima(water.ts,approximation = F,lambda = lambda)
+checkresiduals(water.arima )
+water.arima %>% forecast(h=168) %>% autoplot()
+kpss.test(resid(water.arima))
+```
+
+I had tried this perviously without scaling the data from "water1" and got results that looked sub-par (not shown here).  Upon scaling the input data (which admittedly was quite naive - i'm sure there's a much better way!) i get results that look reasonable.
+
+The residuals look reasonably normal in the ACF is mostly in-bounds.
+
+### Output predictions
+
+```{r}
+water.f <-water.arima %>% forecast(h=168)
+water.f <- data.frame(water.f$mean)
+colnames(water.f) <- "WaterFlow"
+row.names(water.f) <- seq(ymd_hm("2015-12-3 17:00"), ymd_hm("2015-12-10 16:00"), by = "hour")
+kable(water.f)
+write.csv(water.f,"Water_predictions.csv")
+```
