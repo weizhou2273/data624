@@ -7,12 +7,10 @@ date: '2020-10-25'
 
 # Project 1 
 
-
-The rpubs version of this work can be found[here](https://rpubs.com/plb_lttfer/591649), and source/data can be found on github [here](https://github.com/plb2018/DATA624/tree/master/project1).
  
 ## Description
 
-This project consists of 3 parts - two required and one bonus and is worth 15% of your grade.  The project is due at 11:59 PM on Sunday March 31.  I will accept late submissions with a penalty until the meetup after that when we review some projects.
+This project consists of 3 parts - two required and one bonus and is worth 15% of your grade.
 
 ```{r load.packages, message=FALSE, warning=FALSE}
 rm(list = ls())
@@ -32,22 +30,22 @@ Load all the data for all 3 parts from github in the interest of reproducibility
 
 ```{r load.data, warning=FALSE}
 temp_file <- tempfile(fileext = ".xlsx")
-download.file(url = "https://github.com/plb2018/DATA624/raw/master/project1/ATM624Data.xlsx?raw=true", 
+download.file(url = "https://github.com/weizhou2273/data624/blob/master/project1_data/ATM624Data.xlsx?raw=true", 
               destfile = temp_file, 
               mode = "wb", 
               quiet = TRUE)
 ATM <- readxl::read_excel(temp_file,skip=0,col_types = c("date","text","numeric"))
-download.file(url = "https://github.com/plb2018/DATA624/raw/master/project1/ResidentialCustomerForecastLoad-624.xlsx?raw=true", 
+download.file(url = "https://github.com/weizhou2273/data624/blob/master/project1_data/ResidentialCustomerForecastLoad-624.xlsx?raw=true", 
               destfile = temp_file, 
               mode = "wb", 
               quiet = TRUE)
 power <- readxl::read_excel(temp_file,skip=0,col_types = c("numeric","text","numeric"))
-download.file(url = "https://github.com/plb2018/DATA624/raw/master/project1/Waterflow_Pipe1.xlsx?raw=true", 
+download.file(url = "https://github.com/weizhou2273/data624/blob/master/project1_data/Waterflow_Pipe1.xlsx?raw=true", 
               destfile = temp_file, 
               mode = "wb", 
               quiet = TRUE)
 water1 <- readxl::read_excel(temp_file,skip=0,col_types = c("date","numeric"))
-download.file(url = "https://github.com/plb2018/DATA624/raw/master/project1/Waterflow_Pipe2.xlsx?raw=true", 
+download.file(url = "https://github.com/weizhou2273/data624/blob/master/project1_data/Waterflow_Pipe2.xlsx?raw=true", 
               destfile = temp_file, 
               mode = "wb", 
               quiet = TRUE)
@@ -70,10 +68,10 @@ We find a few missing values
  
 ```{r}
 ATM[!complete.cases(ATM),]
-p <- ggplot(ATM[complete.cases(ATM),],aes(x=DATE,y=Cash,color=ATM))+
+p <- ggplot(ATM[complete.cases(ATM),],aes(x=DATE,y=Cash))+
   geom_line()
 p + facet_grid(rows = vars(ATM),scales="free")
-p <- ggplot(ATM[complete.cases(ATM),],aes(x=Cash,color=ATM))+
+p <- ggplot(ATM[complete.cases(ATM),],aes(x=Cash))+
   geom_histogram()
 p + facet_grid(cols = vars(ATM),scales="free")
 ```
