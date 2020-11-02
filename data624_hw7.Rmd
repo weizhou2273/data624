@@ -1,0 +1,263 @@
+---
+title: 'Data 624 - Homework #7'
+author: "Wei Zhou"
+date: '2020-10-30'
+
+---
+
+
+Exercises 6.2 & 6.3  from the K&J book. 
+
+```{r load.requirements, warning = FALSE, message = FALSE}
+#clear the workspace
+rm(list = ls())
+#load req's packages
+library(AppliedPredictiveModeling)
+library(caret)
+library(elasticnet)
+library(knitr)
+library(ggplot2)
+library(kableExtra)
+```
+
+
+## Question 6.2
+
+Developing a model to predict permeability (see Sect. 1.4) could save significant
+resources for a pharmaceutical company, while at the same time more
+rapidly identifying molecules that have a sufficient permeability to become a
+drug:
+
+### a) Start R and use these commands to load the data:
+```{r}
+data(permeability)
+```
+
+The matrix fingerprints contains the 1,107 binary molecular predictors
+for the 165 compounds, while permeability contains permeability
+response.
+
+### b) The fingerprint predictors indicate the presence or absence of substructures of a molecule and are often sparse meaning that relatively few of the molecules contain each substructure. Filter out the predictors that have low frequencies using the nearZeroVar function from the caret package. How many predictors are left for modeling?
+
+```{r}
+#drop everything with near zero variability 
+f  <- fingerprints[, -nearZeroVar(fingerprints)]
+```
+
+Filtering using nearZero resulted in the number of variables going from `r dim(fingerprints)[2]` to `r dim(f)[2]`, a decrease of `r dim(fingerprints)[2] - dim(f)[2]`.
+
+
+
+### c) Split the data into a training and a test set, pre-process the data, and tune a PLS model. How many latent variables are optimal and what is the corresponding resampled estimate of R2?
+
+First we'll split the data
+
+```{r}
+set.seed(11)
+#add perm data to f before we split
+f <- cbind(data.frame(permeability),f)
+#split 75/25
+n <-  floor(0.75 * nrow(f))
+idx <- sample(seq_len(nrow(f)), size = n)
+train <- f[idx, ]
+test <- f[-idx, ]
+```
+
+Next we run the PLS
+
+```{r}
+#train the pls model
+pls.model <- train(train[,-1],
+                   train$permeability,
+                   method = "pls", 
+                   tuneLength = 10,
+                   trControl = trainControl(method = "cv"))
+#output results
+kable(pls.model$results)
+plot(pls.model$results$Rsquared,
+     xlab = "ncomp",
+     ylab = "Rsquared"
+     )
+```
+
+The optimal is `r which.max(pls.model$results$Rsquared)`  and the with the corresponding estimate of $R^2$ at `r max(pls.model$results$Rsquared)`
+
+
+### d) Predict the response for the test set. What is the test set estimate of R2?
+
+Next we run the model:
+
+```{r}
+output <- predict(pls.model, test, ncomp = 10)
+postResample(pred = output, obs = test$permeability)
+```
+
+And we can see that the $R^2$ is reduced by about half.
+
+### e) Try building other models discussed in this chapter. Do any have better predictive performance?
+
+
+We'll use an elastic net as a secondary choice here:
+
+```{r}
+#train the model
+enet.model <-  train(x=train[,-1],
+                 y=train$permeability,
+                 method='enet',
+                 metric='RMSE',
+                 tuneGrid=expand.grid(.fraction = seq(0, 1, by=0.2), 
+                                      .lambda = seq(0, 1, by=0.2)),
+                 trControl=trainControl(method='cv',number=10),
+                 preProcess=c('center','scale'))
+plot(enet.model)
+#best params
+enet.model$bestTune
+#perf of best params
+getTrainPerf(enet.model)
+```
+
+The optimal parameters were fraction = `r enet.model$bestTune[[1]]` and lambda = `r enet.model$bestTune[[2]]` with an RMSE of `r getTrainPerf(enet.model)[[1]]` and an R-squared of  `r getTrainPerf(enet.model)[[2]]` 
+
+
+```{r}
+#apply the trained model
+enet.pred <- predict(enet.model, newdata=test[,-1])
+output <- postResample(pred=enet.pred, obs=test$permeability)
+kable(output)
+```
+
+In the above case we can see that the degredation is much less significant AND the out-sample performance for the elastic net is higher than that of the PLS
+
+
+## f) Would you recommend any of your models to replace the permeability laboratory experiment?
+
+The elastic net model looks promising at this stage given it's apparent ability to maintain a high $R^2$ out-of-sample.  I'm sure much further improvements could also be made with this method.
+
+
+
+
+## Question 6.3
+
+A chemical manufacturing process for a pharmaceutical product was discussed in Sect. 1.4. In this problem, the objective is to understand the relationship between biological measurements of the raw materials (predictors), 6.5 Computing 139
+measurements of the manufacturing process (predictors), and the response of
+product yield. Biological predictors cannot be changed but can be used to
+assess the quality of the raw material before processing. On the other hand,
+manufacturing process predictors can be changed in the manufacturing process.
+Improving product yield by 1% will boost revenue by approximately
+one hundred thousand dollars per batch:
+
+
+### a) Start R and use these commands to load the data:
+
+```{r}
+data(ChemicalManufacturingProcess)
+chem <- ChemicalManufacturingProcess
+head(chem)
+```
+
+The matrix processPredictors contains the 57 predictors (12 describing
+the input biological material and 45 describing the process predictors)
+for the 176 manufacturing runs. yield contains the percent yield for each
+run.
+
+### b) A small percentage of cells in the predictor set contain missing values. Use an imputation function to fill in these missing values (e.g., see Sect. 3.8).
+
+For this I used caret::preprocess as was mentioned in the book.  The data are relatively obscure and leave little room for intuition as to the "best" method for imputation so I went with KNN.
+
+```{r}
+#impute using knn
+chem.imp <- preProcess(chem[,2:ncol(chem)], method=c('knnImpute'))
+chem <- cbind(chem$Yield,predict(chem.imp, chem[,2:ncol(chem)]))
+colnames(chem)[1] <- "Yield"
+```
+
+
+### c) Split the data into a training and a test set, pre-process the data, and tune a model of your choice from this chapter. What is the optimal value of the performance metric?
+
+First we split the data into test and training sets.  I've gone with 70/30, which is somewhat arbitrary.
+
+```{r}
+set.seed(11)
+#split 70/30
+n <-  floor(0.70 * nrow(chem))
+idx <- sample(seq_len(nrow(chem)), size = n)
+train <- chem[idx, ]
+test <- chem[-idx, ]
+```
+
+I used caret to run an elastic-net model with a 20-step tuning range from 0-1 by 0.05 for both "lambda" and "fraction".  5-fold cross validation was also used as part of the training process.
+
+
+```{r}
+#train the model
+enet.model <-  train(x=train[,-1],
+                 y=train$Yield,
+                 method='enet',
+                 metric='RMSE',
+                 tuneGrid=expand.grid(.fraction = seq(0, 1, by=0.05), 
+                                      .lambda = seq(0, 1, by=0.05)),
+                 trControl=trainControl(method='cv',number=5),
+                 preProcess=c('center','scale'))
+plot(enet.model)
+#best params
+enet.model$bestTune
+#perf of best params
+getTrainPerf(enet.model)
+```
+
+The optimal parameters were fraction = `r enet.model$bestTune[[1]]` and lambda = `r enet.model$bestTune[[2]]` with an RMSE of `r getTrainPerf(enet.model)[[1]]` and an R-squared of  `r getTrainPerf(enet.model)[[2]]` 
+
+
+
+### d) Predict the response for the test set.What is the value of the performance metric and how does this compare with the resampled performance metric on the training set?
+
+```{r}
+#apply the trained model
+enet.pred <- predict(enet.model, newdata=test[,-1])
+output <- postResample(pred=enet.pred, obs=test$Yield)
+kable(output)
+```
+
+The RMSE is higher than the training set and the R2 is lower.  This is expected as out-sample model performance is almost never as good as in-sample.
+
+
+### e) Which predictors are most important in the model you have trained? Do either the biological or process predictors dominate the list?
+
+```{r}
+#get all the coefficients
+enet.model.coeff <- predict.enet(enet.model$finalModel, s=enet.model$bestTune[1, "fraction"], type="coef", mode="fraction")$coefficients
+#drop the zeros and format
+enet.model.coeff <- data.frame(sort(enet.model.coeff[enet.model.coeff != 0 ]))
+colnames(enet.model.coeff) <- c("Coefficient")
+#output
+kable(enet.model.coeff)
+```
+
+It appears as though Manufacturing Processes dominate the list with process 32 & 13 being the strongest - one with a positive and one with a negative relationship.  Of the 14 non-zero coefficients, we see that 10 are manufacturing related and 4 are biological.  We also see that the top-5 coefficients are manufacturing as opposed to biological.
+
+
+
+### f) Explore the relationships between each of the top predictors and the response. How could this information be helpful in improving yield in future runs of the manufacturing process?
+
+We'll focus on the top 5 predictors for this part.
+
+```{r}
+#extract the top 5
+exp <- chem[,c("Yield",
+               "ManufacturingProcess32",
+               "ManufacturingProcess13",
+               "ManufacturingProcess36",
+               "ManufacturingProcess17",
+               "ManufacturingProcess09")]
+kable(head(exp,5))
+pairs(exp)
+```
+
+If taken the top 5 predictors and plotted them as a "pairs" plot in order to examine the relationships.  A few things:
+
+- Ultimately, our "real world" goal here is to enhance yield as opposed to just creating a good model to predict yield.  In that regard, we may want to reduce exposure to, or elimiate processes with a negative correlation to yield (process 13 and 17... likely 36 also )
+- At a minimum, 13 and 17 themselves appear to be correlated to one another.  Perhapse we could drop one of them entirely in the manufacturing process.
+- Process 32 and to a lesser extent, process 9, appear to have a positive correlation with Yield.  I'd want amplify my exposure to those processes to the extent possible
+- Generally, I'd like to try and figure out WHY the above relationships exist and try to get an intuitive understanding of how to make improvements.
+
+
