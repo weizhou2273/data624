@@ -1,0 +1,241 @@
+
+---
+title: 'Data 624 - Homework #8'
+author: "Wei Zhou"
+date: '2020-11-15'
+---
+
+
+Exercises 7.2 & 7.5  from the K&J book. 
+
+```{r load.requirements, warning = FALSE, message = FALSE}
+#clear the workspace
+rm(list = ls())
+#load req's packages
+library(mlbench)
+library(caret)
+library(knitr)
+library(AppliedPredictiveModeling)
+library(corrplot)
+```
+
+## 7.2
+
+Friedman (1991) introduced several benchmark data sets create by simulation.
+One of these simulations used the following nonlinear equation to
+create data:
+
+$y=10sin(\pi x_1x_2)+20(x_3-0.5)^2 + 10x_4+5x_5+N(0,\sigma^2)$
+
+where the x values are random variables uniformly distributed between [0, 1]
+(there are also 5 other non-informative variables also created in the simulation).
+The package mlbench contains a function called mlbench.friedman1 that
+simulates these data:
+
+```{r}
+set.seed(200)
+trainingData <- mlbench.friedman1(200, sd = 1)
+## We convert the 'x' data from a matrix to a data frame
+## One reason is that this will give the columns names.
+trainingData$x <- data.frame(trainingData$x)
+## Look at the data using
+featurePlot(trainingData$x, trainingData$y)
+## or other methods.
+## This creates a list with a vector 'y' and a matrix
+## of predictors 'x'. Also simulate a large test set to
+## estimate the true error rate with good precision:
+testData <- mlbench.friedman1(5000, sd = 1)
+testData$x <- data.frame(testData$x) 
+```
+Tune several models on these data. For example:
+
+```{r}
+knnModel <- train(x = trainingData$x, 
+                  y = trainingData$y,
+                  method = "knn",
+                  preProcess = c("center", "scale"),
+                  tuneLength = 10)
+knnModel
+```
+
+
+
+```{r}
+knnPred <- predict(knnModel, newdata = testData$x)
+postResample(pred = knnPred, obs = testData$y)
+```
+
+Which models appear to give the best performance? Does MARS select the
+informative predictors (those named $X1-X5$)?
+
+### MARS:
+
+```{r}
+set.seed(19)  #set the see for the 7.2
+grid.MARS <- expand.grid(degree =1:2, nprune=seq(2,14,by=2))
+model.MARS <- train(x = trainingData$x, 
+                    y = trainingData$y, 
+                    method='bagEarth', 
+                    tuneGrid = grid.MARS, 
+                    trControl = trainControl(method = "cv"))
+model.MARS
+pred.MARS <- predict(model.MARS, newdata = testData$x)
+postResample(pred = pred.MARS, obs = testData$y)
+```
+
+### Neural Network:
+
+```{r}
+grid.NN <- expand.grid(size = seq(from = 1, to = 5, by = 1),
+                        decay = seq(from = 0.01, to = 0.1, by = 0.01), 
+                        bag = F)
+maxW.NN <- 5 * (ncol(trainingData$x) + 1) + 5 + 1
+model.NN <- train(x = trainingData$x,
+                    y = trainingData$y,
+                    method = "avNNet",
+                    preProcess = c("center", "scale"),
+                    tuneGrid = grid.NN,
+                    trControl = trainControl(method = "cv"),
+                    linout = TRUE,
+                    trace = FALSE,
+                    MaxNWts = maxW.NN,
+                    maxit = 500)
+model.NN
+pred.NN <- predict(model.NN, newdata = testData$x)
+postResample(pred = pred.NN, obs = testData$y)
+```
+
+
+### SVM:
+
+```{r}
+model.SVM <- train(x = trainingData$x,
+                   y = trainingData$y,
+                   method='svmRadial',
+                   tuneLength = 9,
+                   trControl = trainControl(method = "cv"))
+model.SVM
+pred.SVM <- predict(model.SVM, newdata = testData$x)
+postResample(pred = pred.SVM , obs = testData$y)
+```
+
+### Summary
+
+First we will look at model performance:
+
+```{r}
+model.perf <- cbind(data.frame(postResample(pred = knnPred, obs = testData$y)),
+                    data.frame(postResample(pred = pred.MARS, obs = testData$y)),
+                    data.frame(postResample(pred = pred.NN, obs = testData$y)),
+                    data.frame(postResample(pred = pred.SVM, obs = testData$y)))
+colnames(model.perf) <- c("KNN","MARS","NN","SVM")
+kable(round(model.perf,2))
+```
+
+For this particular problem, we can see that the MARS model the superior performer.  MARS shows the smallest error stats and the higest Rsquared. 
+
+
+```{r}
+var.importance <- cbind(varImp(knnModel)[[1]],
+                        varImp(model.NN)[[1]],
+                        varImp(model.SVM)[[1]])
+colnames(var.importance) <- c("KNN","NN","SVM")
+kable(round(var.importance))
+```
+
+All of the models correctly identify $X1-X5$ as the important variables while almost identifying $X6-X10$ as not important.
+
+Interestingly, MARS performs the best and also shows 2 distinct differences:  For the MARS model,   $X3$ is significantly over-weight as compared to other models and $X4$ is signifcantly underweight vs. the other models. 
+
+ 
+## 7.5
+
+Exercise 6.3 describes data for a chemical manufacturing process. Use
+the same data imputation, data splitting, and pre-processing steps as before
+and train several nonlinear regression models.
+
+```{r}
+set.seed(19) #reset the seed for Q 7.5 
+data(ChemicalManufacturingProcess)
+chem <- ChemicalManufacturingProcess
+#impute using knn
+chem.imp <- preProcess(chem[,2:ncol(chem)], method=c('knnImpute'))
+chem <- cbind(chem$Yield,predict(chem.imp, chem[,2:ncol(chem)]))
+colnames(chem)[1] <- "Yield"
+#split 70/30
+n <-  floor(0.70 * nrow(chem))
+idx <- sample(seq_len(nrow(chem)), size = n)
+train <- chem[idx, ]
+test <- chem[-idx, ]
+```
+
+
+```{r, warning=FALSE}
+knnModel <- train(x=train[,-1],
+                  y=train$Yield,
+                  method = "knn",
+                  preProcess = c("center", "scale"),
+                  tuneLength = 10)
+knnModel
+knnPred <- predict(knnModel, newdata = test[,-1])
+postResample(pred = knnPred, obs = test$Yield)
+grid.MARS <- expand.grid(degree =1:2, nprune=seq(2,14,by=2))
+model.MARS <- train(x=train[,-1],
+                    y=train$Yield, 
+                    method='bagEarth', 
+                    tuneGrid = grid.MARS, 
+                    trControl = trainControl(method = "cv"))
+model.MARS
+pred.MARS <- predict(model.MARS, newdata = test[,-1])
+postResample(pred = pred.MARS, obs = test$Yield)
+grid.NN <- expand.grid(size = seq(from = 1, to = 5, by = 1),
+                        decay = seq(from = 0.01, to = 0.1, by = 0.01), 
+                        bag = F)
+maxW.NN <- 5 * (ncol(train[,-1]) + 1) + 5 + 1
+model.NN <- train(x=train[,-1],
+                 y=train$Yield,
+                    method = "avNNet",
+                    preProcess = c("center", "scale"),
+                    tuneGrid = grid.NN,
+                    trControl = trainControl(method = "cv"),
+                    linout = TRUE,
+                    trace = FALSE,
+                    MaxNWts = maxW.NN ,
+                    maxit = 500)
+model.NN
+pred.NN <- predict(model.NN, newdata = test[,-1])
+postResample(pred = pred.NN, obs = test$Yield)
+model.SVM <- train(x=train[,-1],
+                   y=train$Yield,
+                   method='svmRadial',
+                   tuneLength = 9,
+                   trControl = trainControl(method = "cv"))
+model.SVM
+pred.SVM <- predict(model.SVM, newdata = test[,-1])
+postResample(pred = pred.SVM , obs = test$Yield)
+```
+
+### A 
+Which nonlinear regression model gives the optimal resampling and test set performance?
+
+```{r}
+model.perf <- cbind(data.frame(postResample(pred = knnPred, obs =test$Yield)),
+                    data.frame(postResample(pred = pred.MARS, obs = test$Yield)),
+                    data.frame(postResample(pred = pred.NN, obs = test$Yield)),
+                    data.frame(postResample(pred = pred.SVM, obs = test$Yield)))
+colnames(model.perf) <- c("KNN","MARS","NN","SVM")
+kable(round(model.perf,2))
+```
+
+### B 
+Which predictors are most important in the optimal nonlinear regression
+model? Do either the biological or process variables dominate the
+list? How do the top ten important predictors compare to the top ten
+predictors from the optimal linear model?
+
+```{r}
+var.importance <- cbind(varImp(knnModel)[[1]],
+                        varImp(model.NN)[[1]],
+                        varImp(model.SVM)[[1]])
+colnames(var.importance) <- c("KNN","NN","SVM")
+kable(round(var.importance))
